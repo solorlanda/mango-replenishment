@@ -10,7 +10,28 @@ const schema=z.discriminatedUnion('action',[
 ]);
 const json=(body:unknown,status=200)=>Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 export async function GET(request:Request){
-  const shift=shiftSchema.safeParse(new URL(request.url).searchParams.get('shift'));
+  const params = new URL(request.url).searchParams;
+  if (params.get('view') === 'weekly-unavailable') {
+    const today = new Intl.DateTimeFormat('sv-SE', {timeZone:'Europe/Copenhagen'}).format(new Date());
+    const day = new Date(today + 'T00:00:00Z');
+    const shifts: string[] = [];
+    for (let offset = 0; offset < 7; offset++) {
+      const date = day.toISOString().slice(0, 10);
+      shifts.push(date + ' · Mañana', date + ' · Tarde');
+      day.setUTCDate(day.getUTCDate() - 1);
+    }
+    try {
+      const items = await getItems();
+      const rows = await items.find({shift:{$in:shifts},status:'unavailable'}, {projection:{_id:0}}).toArray();
+      rows.sort((a,b) => a.name.localeCompare(b.name,'en',{sensitivity:'base'})
+        || a.color.localeCompare(b.color,'en',{sensitivity:'base'})
+        || b.created - a.created);
+      return json(rows);
+    } catch {
+      return json({error:'Unable to load unavailable sizes. Please try again.'},503);
+    }
+  }
+  const shift=shiftSchema.safeParse(params.get('shift'));
   if(!shift.success)return json({error:'A valid shift is required.'},400);
   try {
     const items=await getItems();
